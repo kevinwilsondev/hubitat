@@ -1,7 +1,7 @@
 ## Sonoff Zigbee Metering Mini Dimmer (MINI-ZBDIM) driver for Hubitat Elevation
 
-This is a **Hubitat Elevation** device driver for the **Sonoff MINI-ZBDIM** module. It supports power metering, external switch mode, power-on behavior, and fade durations for both Zigbee commands and from the external switch.
-
+This is a **Hubitat Elevation** device driver for the **Sonoff MINI-ZBDIM** module. It supports power metering, external switch mode, power-on behavior, and fade durations for both Zigbee commands and from the external switch.\
+<img src="MINI-ZBDIM.png" width="350" alt="Sonoff MINI-ZBDIM module" />\
 An explanation of some of the preferences and commands:
 
 - **Standby ghost power:**\
