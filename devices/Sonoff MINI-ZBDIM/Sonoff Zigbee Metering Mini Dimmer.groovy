@@ -1,5 +1,80 @@
+/**
+ *  Sonoff Zigbee Metering Mini Dimmer (MINI-ZBDIM) driver for Hubitat Elevation
+ *  
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
+ *
+ *  This is a Hubitat Elevation device driver for the Sonoff MINI-ZBDIM module. It supports power metering, external
+ *  switch mode, power-on behavior, and fade durations for both Zigbee commands and from the external switch.
+ *
+ *  An explanation of some of the preferences and commands:
+ *
+ *  - Standby ghost power:
+ *    The device seems to always report a small power draw even when the output is switched off. It might be measuring
+ *    its own power draw, or it might just be inaccurate. There are two preferences to stop this:
+ *
+ *    1. "Standby ghost power": this is the power, in Watts, that will be subtracted from the reported power sent by the
+ *                              device. Default is 0.07.
+ *    2. "Standby power threshold": any power report sent by the device that's less than this amount (in Watts) will be
+ *                                  set to zero, so it appears fully off. Default is 0.05, 0.0 disables it.
+ *
+ *  - Fade transition times:
+ *    The device seems to ignore the fade duration when setting the brightness level. It does, however, have a setting
+ *    for a global fade duration. By sending the command to set this before the brightness/on/off command we can
+ *    achieve the same effect. This is DISABLED BY DEFAULT because every time the duration is changed: 
+ *
+ *    1. The device will write the setting to its NVRAM, which could wear it out quite quickly.
+ *    2. There will be a slight delay while the command is sent before the lights change.
+ *
+ *    The duration command is only sent if it's different from the last duration used, so if you rarely set a duration
+ *    when you change brightness, it's probably safe to enable this with the "Allow dynamic transition speeds" setting.
+ *    The "Default transition speed" setting is the duration for brightness changes with no duration included, and for 
+ *    switching on and off. The default is 2.5 seconds.
+ *
+ *    Unlike some other dimmers, this device treats the duration as how long it should take if changing from 0% to 100% 
+ *    (or 100% to 0%). If you change from 100% to 50%, for example, it will take half that amount of time.
+ *
+ *    There's a separate setting, "External switch fade rate", to control how quickly the brightness changes when using
+ *    the external switch. It's a multiplier that speeds it up or slows it down, rather than a specific duration.
+ *
+ *  - Calibration:
+ *    The device can run a calibration to detect the properties of the bulbs connected to it. To trigger this use the
+ *    "Start Calibration" command. After a few seconds the calibration will start and, if you have descriptionText 
+ *    logging enabled, you'll start to see the calibration progress percentage appear in the logs. The calibration
+ *    process might take one or two minutes.
+ *
+ */
+
+import groovy.transform.Field
+
+@Field static final String VERSION = "1.0.0"
+@Field static final String SONOFF_MFG_ID = "0x128C"
+@Field static final String SONOFF_CLUSTER_ID = "FC11"
+@Field static final Integer SONOFF_CLUSTER_ID_HEX = 0xFC11
+@Field static final Integer SONOFF_CLUSTER_INT = 64529
+@Field static final String POWER_ON_BEHAVIOR_PREVIOUS = "Previous State"
+@Field static final String POWER_ON_BEHAVIOR_OFF = "Off"
+@Field static final String POWER_ON_BEHAVIOR_ON = "On"
+@Field static final String POWER_ON_BEHAVIOR_TOGGLE = "Toggle Previous"
+@Field static final String SWITCH_MODE_TRIPLE = "Triple Button"
+@Field static final String SWITCH_MODE_DUAL = "Dual Button"
+@Field static final String SWITCH_MODE_MOMENTARY = "Single Momentary"
+@Field static final String SWITCH_MODE_TOGGLE = "Single Toggle"
+@Field static final Integer DEFAULT_SWITCH_RATE = 4
+@Field static final Float DEFAULT_TRANSITION_RATE = 2.5
+@Field static final Float DEFAULT_STANDBY_GHOST_POWER = 0.07
+@Field static final Float DEFAULT_STANDBY_THRESHOLD = 0.05
+
+
 metadata {
-    definition (name: "Sonoff Zigbee Metering Mini Dimmer", namespace: "kevinwilsondev.hubitat", author: "Kevin Wilson") {
+    definition (name: "Sonoff Zigbee Metering Mini Dimmer", namespace: "kevinwilsondev.hubitat", author: "Kevin Wilson", importUrl: "https://raw.githubusercontent.com/kevinwilsondev/hubitat/refs/heads/main/devices/Sonoff%20MINI-ZBDIM/Sonoff%20Zigbee%20Metering%20Mini%20Dimmer.groovy") {
         capability "Switch"
         capability "SwitchLevel"
         capability "PowerMeter"
@@ -21,24 +96,25 @@ metadata {
     }
 
     preferences {
-        input name: "switchMode", type: "enum", title: "External switch type", defaultValue: "Triple Button", options: ["Triple Button", "Dual Button", "Single Momentary", "Single Toggle"]
-        input name: "switchRate", type: "number", title: "External switch fade rate", defaultValue: 4, range: "1..5"
-        input name: "powerOnBehavior", type: "enum", title: "Power-on behavior", defaultValue: "Previous State", options: ["Previous State", "Off", "On", "Toggle Previous"]
-        input name: "defaultTransition", type: "number", title: "Default transition speed (seconds)", defaultValue: 2.5, range: "0..60"
+        input name: "switchMode", type: "enum", title: "External switch type", defaultValue: SWITCH_MODE_TRIPLE, options: [SWITCH_MODE_TRIPLE, SWITCH_MODE_DUAL, SWITCH_MODE_MOMENTARY, SWITCH_MODE_TOGGLE]
+        input name: "switchRate", type: "number", title: "External switch fade rate", defaultValue: DEFAULT_SWITCH_RATE, range: "1..5"
+        input name: "powerOnBehavior", type: "enum", title: "Power-on behavior", defaultValue: POWER_ON_BEHAVIOR_PREVIOUS, options: [POWER_ON_BEHAVIOR_PREVIOUS, POWER_ON_BEHAVIOR_OFF, POWER_ON_BEHAVIOR_ON, POWER_ON_BEHAVIOR_TOGGLE]
+        input name: "defaultTransition", type: "number", title: "Default transition speed (seconds)", defaultValue: DEFAULT_TRANSITION_RATE, range: "0..60"
         input name: "dynamicTransitions", type: "bool", title: "Allow dynamic transition speeds", defaultValue: false
-        input name: "standbyGhostPower", type: "number", title: "Standby ghost power (Watts)", defaultValue: 0.07, range: "0..5"
-        input name: "standbyPowerThreshold", type: "number", title: "Standby power threshold (Watts)", defaultValue: 0.05, range: "0..5"
+        input name: "standbyGhostPower", type: "number", title: "Standby ghost power (Watts)", defaultValue: DEFAULT_STANDBY_GHOST_POWER, range: "0..5"
+        input name: "standbyPowerThreshold", type: "number", title: "Standby power threshold (Watts)", defaultValue: DEFAULT_STANDBY_THRESHOLD, range: "0..5"
         input name: "txtEnable", type: "bool", title: "Enable descriptionText logging", defaultValue: true
         input name: "logEnable", type: "bool", title: "Enable debug logging", defaultValue: false
     }
 }
 
+
 // Parse incoming Zigbee messages
 def parse(String description) {
     logDebug("Parse description: ${description}")
 
-    // Check if this is the custom Sonoff FC11 Cluster
-    if (description?.contains("cluster: FC11") || description?.contains("clusterInt: 64529")) {
+    // Check if this is the custom Sonoff cluster
+    if (description?.contains("cluster: ${SONOFF_CLUSTER_ID}") || description?.contains("clusterInt: ${SONOFF_CLUSTER_INT}")) {
         parseCustomSonoffCluster(description)
         return
     }
@@ -58,14 +134,15 @@ def parse(String description) {
         def descMap = zigbee.parseDescriptionAsMap(description)
         logDebug("Parsed map: ${descMap}")
 
-        if ((descMap.clusterInt == 64529 || descMap.clusterId == "FC11") && description.startsWith("catchall:")) {
+        if ((descMap.clusterInt == SONOFF_CLUSTER_INT || descMap.clusterId == SONOFF_CLUSTER_ID) && description.startsWith("catchall:")) {
             logDebug("Sonoff catchall")
+            return
         }
 
         // Power-on behavior (genOnOff cluster, standard attribute 0x4003 "startUpOnOff") - arrives either as an attribute report (command 0A) or a read attributes
         // response (command 01) depending on whether it was pushed or explicitly read via refresh()/configure().
         if (descMap.clusterInt == 6 && descMap.attrId == "4003") {
-            String behaviorText = ["00": "Off", "01": "On", "02": "Toggle Previous", "FF": "Previous State"][descMap.value?.toUpperCase()] ?: "unknown (${descMap.value})"
+            String behaviorText = ["00": POWER_ON_BEHAVIOR_OFF, "01": POWER_ON_BEHAVIOR_ON, "02": POWER_ON_BEHAVIOR_TOGGLE, "FF": POWER_ON_BEHAVIOR_PREVIOUS][descMap.value?.toUpperCase()] ?: "unknown (${descMap.value})"
             logText("${device.displayName} power-on behavior is ${behaviorText}")
             sendEvent(name: "powerOnBehavior", value: behaviorText)
         }
@@ -98,7 +175,7 @@ private void handleLevelReporting(int level) {
 
 private void parseCustomSonoffCluster(String description) {
     def map = zigbee.parseDescriptionAsMap(description)
-    logDebug("Parsing Sonoff cluster FC11: ${map}")
+    logDebug("Parsing Sonoff cluster: ${map}")
 
     def attributes = []
     if (map.attrId) {
@@ -110,8 +187,8 @@ private void parseCustomSonoffCluster(String description) {
 
     double currentVoltage = device.currentValue("voltage") ?: 235.0
     double currentPower = device.currentValue("power") ?: 0.0
-    float ghostPower = standbyGhostPower ? standbyGhostPower.toFloat() : 0.0
-    float powerThreshold = standbyPowerThreshold ? standbyPowerThreshold.toFloat() : 0.5
+    float ghostPower = standbyGhostPower ? standbyGhostPower.toFloat() : DEFAULT_STANDBY_GHOST_POWER
+    float powerThreshold = standbyPowerThreshold ? standbyPowerThreshold.toFloat() : DEFAULT_STANDBY_THRESHOLD
     boolean powerUpdated = false
     boolean voltageUpdated = false
 
@@ -124,7 +201,7 @@ private void parseCustomSonoffCluster(String description) {
             switch (attr.id?.toUpperCase()) {
                 // External switch mode
                 case "0016":
-                    String statusText = ["0": "Single Toggle", "1": "Single Momentary", "3": "Dual Button", "4": "Triple Button"]["${rawValue}"] ?: "unknown (${rawValue})"
+                    String statusText = ["0": SWITCH_MODE_TOGGLE, "1": SWITCH_MODE_MOMENTARY, "3": SWITCH_MODE_DUAL, "4": SWITCH_MODE_TRIPLE]["${rawValue}"] ?: "unknown (${rawValue})"
                     logText("${device.displayName} external switch mode is ${statusText}")
                     sendEvent(name: "switchMode", value: statusText)
                     break
@@ -195,7 +272,7 @@ def on() {
     logDebug("Turning <b>on</b>")
 
     List<String> cmds = []
-    float transitionSeconds = defaultTransition != null ? defaultTransition.toFloat() : 2.5
+    float transitionSeconds = defaultTransition != null ? defaultTransition.toFloat() : DEFAULT_TRANSITION_RATE
     int tenthsOfSecond = Math.round(transitionSeconds * 10)
 
     if (state.currentDuration != transitionSeconds && dynamicTransitions) {
@@ -212,7 +289,7 @@ def off() {
     logDebug("Turning <b>off</b>")
 
     List<String> cmds = []
-    float transitionSeconds = defaultTransition != null ? defaultTransition.toFloat() : 2.5
+    float transitionSeconds = defaultTransition != null ? defaultTransition.toFloat() : DEFAULT_TRANSITION_RATE
     int tenthsOfSecond = Math.round(transitionSeconds * 10)
 
     if (state.currentDuration != transitionSeconds && dynamicTransitions) {
@@ -237,7 +314,7 @@ def setLevel(level, duration = null) {
 
     List<String> cmds = []
 
-    float targetSeconds = (duration != null) ? duration.toFloat() : ((defaultTransition != null) ? defaultTransition.toFloat() : 2.5)
+    float targetSeconds = (duration != null) ? duration.toFloat() : ((defaultTransition != null) ? defaultTransition.toFloat() : DEFAULT_TRANSITION_RATE)
     int tenthsOfSecond = Math.round(targetSeconds * 10)
 
     if (state.currentDuration != targetSeconds && dynamicTransitions) {
@@ -260,7 +337,6 @@ def setLevel(level, duration = null) {
 
 def startCalibration() {
     logDebug("Starting <b>calibration</b>")
-
     return ["he wattr 0x${device.deviceNetworkId} 0x01 0xFC11 0x001D 0x42 {03010101}"]
 }
 
@@ -274,12 +350,12 @@ def refresh() {
 
     List<String> cmds = zigbee.onOffRefresh() +
                         zigbee.levelRefresh() +
-                        zigbee.readAttribute(0xFC11, [0x7004, 0x7005, 0x7006]) +   // Power reporting
-                        zigbee.readAttribute(0xFC11, 0x001E) +                     // Calibration status
-                        zigbee.readAttribute(0xFC11, 0x0020) +                     // Calibration progress
-                        zigbee.readAttribute(0xFC11, 0x0016) +                     // Switch mode
-                        zigbee.readAttribute(0xFC11, 0x4003) +                     // Switch duration
-                        zigbee.readAttribute(0x0006, 0x4003)                       // Power-on behavior
+                        zigbee.readAttribute(SONOFF_CLUSTER_ID_HEX, [0x7004, 0x7005, 0x7006]) +   // Power reporting
+                        zigbee.readAttribute(SONOFF_CLUSTER_ID_HEX, 0x001E) +                     // Calibration status
+                        zigbee.readAttribute(SONOFF_CLUSTER_ID_HEX, 0x0020) +                     // Calibration progress
+                        zigbee.readAttribute(SONOFF_CLUSTER_ID_HEX, 0x0016) +                     // Switch mode
+                        zigbee.readAttribute(SONOFF_CLUSTER_ID_HEX, 0x4003) +                     // Switch duration
+                        zigbee.readAttribute(0x0006, 0x4003)                                      // Power-on behavior
     return delayBetween(cmds, 50)
 }
 
@@ -293,9 +369,9 @@ def configure() {
     // Normal core control configurations mixed with manufacturer registration hooks
     def configCmds = zigbee.onOffConfig() +
                      zigbee.levelConfig() +
-                     zigbee.configureReporting(0xFC11, 0x7004, 0x23, 1, 3600, 1, [mfgCode: "0x128C"]) +
-                     zigbee.configureReporting(0xFC11, 0x7005, 0x23, 5, 3600, 1000, [mfgCode: "0x128C"]) +
-                     zigbee.configureReporting(0xFC11, 0x7006, 0x23, 5, 3600, 50, [mfgCode: "0x128C"]) +
+                     zigbee.configureReporting(SONOFF_CLUSTER_ID_HEX, 0x7004, 0x23, 1, 3600, 1, [mfgCode: SONOFF_MFG_ID]) +
+                     zigbee.configureReporting(SONOFF_CLUSTER_ID_HEX, 0x7005, 0x23, 5, 3600, 1000, [mfgCode: SONOFF_MFG_ID]) +
+                     zigbee.configureReporting(SONOFF_CLUSTER_ID_HEX, 0x7006, 0x23, 5, 3600, 50, [mfgCode: SONOFF_MFG_ID]) +
                      "delay 1000"
 
     return configCmds + refresh()
@@ -316,16 +392,16 @@ def updated() {
 
     List<String> cmds = []
 
-    String powerOnString = powerOnBehavior ?: "Previous State"
+    String powerOnString = powerOnBehavior ?: POWER_ON_BEHAVIOR_PREVIOUS
     int powerOnVal = 0xFF
     switch (powerOnString) {
-        case "Off":
+        case POWER_ON_BEHAVIOR_OFF:
             powerOnVal = 0x00
             break
-        case "On":
+        case POWER_ON_BEHAVIOR_ON:
             powerOnVal = 0x01
             break
-        case "Toggle Previous":
+        case POWER_ON_BEHAVIOR_TOGGLE:
             powerOnVal = 0x02
             break
     }
@@ -333,34 +409,34 @@ def updated() {
     cmds += zigbee.writeAttribute(0x0006, 0x4003, 0x30, powerOnVal)
 
 
-    float transitionSeconds = defaultTransition != null ? defaultTransition.toFloat() : 2.5
+    float transitionSeconds = defaultTransition != null ? defaultTransition.toFloat() : DEFAULT_TRANSITION_RATE
     int tenthsOfSecond = Math.round(transitionSeconds * 10)
 
     logDebug("Default transition speed: ${tenthsOfSecond} (${transitionSeconds} s)")
-    cmds += zigbee.writeAttribute(0xFC11, 0x001F, 0x23, tenthsOfSecond)
+    cmds += zigbee.writeAttribute(SONOFF_CLUSTER_ID_HEX, 0x001F, 0x23, tenthsOfSecond)
     state.currentDuration = transitionSeconds
 
 
-    String switchModeString = switchMode ?: "Triple Button"
+    String switchModeString = switchMode ?: SWITCH_MODE_TRIPLE
     int switchModeVal = 0x04
     switch (switchModeString) {
-        case "Dual Button":
+        case SWITCH_MODE_DUAL:
             switchModeVal = 0x03
             break
-        case "Single Momentary":
+        case SWITCH_MODE_MOMENTARY:
             switchModeVal = 0x01
             break
-        case "Single Toggle":
+        case SWITCH_MODE_TOGGLE:
             switchModeVal = 0x00
             break
     }
     logDebug("External switch mode: ${switchModeString} (${switchModeVal})")
-    cmds += zigbee.writeAttribute(0xFC11, 0x0016, 0x20, switchModeVal)
+    cmds += zigbee.writeAttribute(SONOFF_CLUSTER_ID_HEX, 0x0016, 0x20, switchModeVal)
 
 
-    int switchRateVal = switchRate != null ? switchRate.toInteger() : 4
+    int switchRateVal = switchRate != null ? switchRate.toInteger() : DEFAULT_SWITCH_RATE
     logDebug("External switch fade rate: ${switchRateVal}")
-    cmds += zigbee.writeAttribute(0xFC11, 0x4003, 0x20, switchRateVal)
+    cmds += zigbee.writeAttribute(SONOFF_CLUSTER_ID_HEX, 0x4003, 0x20, switchRateVal)
 
     cmds += "delay 5000"
     cmds += refresh()
