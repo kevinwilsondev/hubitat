@@ -100,7 +100,7 @@ metadata {
         input name: "switchRate", type: "number", title: "External switch fade rate", defaultValue: DEFAULT_SWITCH_RATE, range: "1..5"
         input name: "powerOnBehavior", type: "enum", title: "Power-on behavior", defaultValue: POWER_ON_BEHAVIOR_PREVIOUS, options: [POWER_ON_BEHAVIOR_PREVIOUS, POWER_ON_BEHAVIOR_OFF, POWER_ON_BEHAVIOR_ON, POWER_ON_BEHAVIOR_TOGGLE]
         input name: "defaultTransition", type: "number", title: "Default transition speed (seconds)", defaultValue: DEFAULT_TRANSITION_RATE, range: "0..60"
-        input name: "dynamicTransitions", type: "bool", title: "Allow dynamic transition speeds", defaultValue: false
+        input name: "dynamicTransitions", type: "bool", title: "Allow dynamic transition speeds (not recommended)", description: "<small>Increases NVRAM wear: read README before enabling</small>", defaultValue: false
         input name: "standbyGhostPower", type: "number", title: "Standby ghost power (Watts)", defaultValue: DEFAULT_STANDBY_GHOST_POWER, range: "0..5"
         input name: "standbyPowerThreshold", type: "number", title: "Standby power threshold (Watts)", defaultValue: DEFAULT_STANDBY_THRESHOLD, range: "0..5"
         input name: "txtEnable", type: "bool", title: "Enable descriptionText logging", defaultValue: true
