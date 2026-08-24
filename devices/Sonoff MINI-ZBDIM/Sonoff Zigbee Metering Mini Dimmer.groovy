@@ -74,7 +74,7 @@ import groovy.transform.Field
 
 
 metadata {
-    definition (name: "Sonoff Zigbee Metering Mini Dimmer", namespace: "kevinwilsondev.hubitat", author: "Kevin Wilson", importUrl: "https://raw.githubusercontent.com/kevinwilsondev/hubitat/refs/heads/main/devices/Sonoff%20MINI-ZBDIM/Sonoff%20Zigbee%20Metering%20Mini%20Dimmer.groovy") {
+    definition (name: "Sonoff Zigbee Metering Mini Dimmer", namespace: "kevinwilsondev.hubitat", author: "Kevin Wilson", importUrl: "https://raw.githubusercontent.com/kevinwilsondev/hubitat/main/devices/Sonoff%20MINI-ZBDIM/Sonoff%20Zigbee%20Metering%20Mini%20Dimmer.groovy") {
         capability "Switch"
         capability "SwitchLevel"
         capability "PowerMeter"
